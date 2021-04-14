@@ -1,14 +1,14 @@
 package 达达
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gogf/gf/encoding/gjson"
 	"strconv"
 	"strings"
 	"time"
-	"达达配送/Util/HTTP"
-	"达达配送/Util/MD5"
+	"达达配送/Util"
 )
 
 //https://newopen.imdada.cn/#/quickStart/develop/mustRead?_k=lzfb26
@@ -34,15 +34,17 @@ type Config struct {
 	IsTest bool
 }
 
-//达达 初始化配置信息
+//达达 初始化配置信息 Source_id,测试环境默认为=73753
 func GetDaDaPeiSongRun(App_key,App_secret,Source_id string)Config  {
 	return Config{
 		Format: "json",
 		Timestamp: strconv.FormatInt(time.Now().Unix(), 10),
 		App_key: App_key,
 		V: "1.0",
-		Signature: Source_id,
+		Source_id: Source_id,
 		App_secret: App_secret,
+
+		IsTest: true,
 	}
 }
 
@@ -54,12 +56,12 @@ func (_data Config)SetSign()Config  {
 		"app_key",_data.App_key,
 		"body",_data.Body,
 		"format",_data.Format,
-		"source_id",_data.Signature,
+		"source_id",_data.Source_id,
 		"timestamp",_data.Timestamp,
 		"v",_data.V,
 		)
 	sign=fmt.Sprint(_data.App_secret,sign,_data.App_secret)
-	sign=MD5.GetMD5(sign)
+	sign=Util.GetMD5(sign)
 	sign=strings.ToUpper(sign)
 	_data.Signature=sign
 
@@ -78,13 +80,38 @@ func (_data Config)SetBody(Body *gjson.Json)Config  {
 
 func (_data Config)Post(urll string)(*gjson.Json,error)  {
 	//正式环境
-	url:="newopen.imdada.cn"
+	url:="https://newopen.imdada.cn"
 	if _data.IsTest {
 		//测试环境
-		url="newopen.qa.imdada.cn"
+		url="https://newopen.qa.imdada.cn"
 	}
 
-	_, _Ret, err := HTTP.HTTPGet2("POST", fmt.Sprint(url, urll), _data)
+	type Config_ struct {
+		//业务参数，JSON字符串
+		Body string `json:"body"`
+		//请求格式，暂时只支持json
+		Format string `json:"format"`
+		//时间戳,单位秒，即unix-timestamp
+		Timestamp string `json:"timestamp"`
+		//签名Hash值，参见：接口签名规则
+		Signature string `json:"signature"`
+		//应用Key，对应开发者账号中的app_key
+		App_key string `json:"app_key"`
+		//API版本
+		V string `json:"v"`
+		//商户编号（创建商户账号分配的编号）	测试环境默认为：73753
+		Source_id string `json:"source_id"`
+	}
+	var data Config_
+	data.Body=_data.Body
+	data.Format=_data.Format
+	data.Timestamp=_data.Timestamp
+	data.Signature=_data.Signature
+	data.App_key=_data.App_key
+	data.V=_data.V
+	data.Source_id=_data.Source_id
+
+	_, _Ret, err := Util.HTTPGet2("POST", fmt.Sprint(url, urll), data)
 	if err != nil {
 		return nil,errors.New("请求错误")
 	}
@@ -168,4 +195,42 @@ type ProductListType struct {
 	Count float64 `json:"count"`
 	//商品单位，默认：件
 	Unit string `json:"unit"`
+}
+
+//达达配送 回调 数据类型
+type SetBodyType struct {
+	//返回达达运单号，默认为空
+	Client_id string `json:"client_id"`
+	//添加订单接口中的origin_id值
+	Order_id string `json:"order_id"`
+	//订单状态(待接单＝1,待取货＝2,配送中＝3,已完成＝4,已取消＝5, 指派单=8,妥投异常之物品返回中=9, 妥投异常之物品返回完成=10, 骑士到店=100,创建达达运单失败=1000 可参考文末的状态说明）
+	Order_status int `json:"order_status"`
+	//订单取消原因,其他状态下默认值为空字符串
+	Cancel_reason string `json:"cancel_reason"`
+	//订单取消原因来源(1:达达配送员取消；2:商家主动取消；3:系统或客服取消；0:默认值)
+	Cancel_from int `json:"cancel_from"`
+	//更新时间，时间戳除了创建达达运单失败=1000的精确毫秒，其他时间戳精确到秒
+	Update_time int64 `json:"update_time"`
+	//对client_id, order_id, update_time的值进行字符串升序排列，再连接字符串，取md5值
+	Signature string `json:"signature"`
+
+	//达达配送员id，接单以后会传
+	Dm_id int `json:"dm_id"`
+	//配送员姓名，接单以后会传
+	Dm_name string `json:"dm_name"`
+	//配送员手机号，接单以后会传
+	Dm_mobile string `json:"dm_mobile"`
+	//收货码
+	Finish_code string `json:"finish_code"`
+}
+
+//回调
+//https://newopen.imdada.cn/#/development/file/order?_k=55zbmn
+func (_data Config)Set(Body string)(*SetBodyType,error)  {
+	var data SetBodyType
+	err := json.Unmarshal([]byte(Body), &data)
+	if err != nil {
+		return nil,err
+	}
+	return &data,nil
 }

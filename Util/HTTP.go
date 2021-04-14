@@ -1,4 +1,4 @@
-package HTTP
+package Util
 
 import (
 	"bytes"
